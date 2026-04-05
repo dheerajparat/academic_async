@@ -5,7 +5,6 @@ import 'package:academic_async/controllers/theme_controller.dart';
 import 'package:academic_async/pages/auth/auth_gate_page.dart';
 import 'package:academic_async/pages/homepage.dart';
 import 'package:academic_async/services/background_service.dart';
-import 'package:academic_async/services/event_sync_service.dart';
 import 'package:academic_async/services/notification_service.dart';
 import 'package:academic_async/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -40,13 +39,6 @@ Future<void> _warmUpServicesAfterLaunch() async {
       debugPrint('Background service registration failed: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
-  }
-
-  try {
-    await EventSyncService.syncEvents(forceFull: true, sideEffects: true);
-  } catch (error, stackTrace) {
-    debugPrint('Event sync bootstrap failed: $error');
-    debugPrintStack(stackTrace: stackTrace);
   }
 }
 

@@ -4,8 +4,14 @@ import 'package:academic_async/services/home_widget_service.dart';
 import 'package:academic_async/services/notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 
 class EventSyncService {
+  static const Duration _minIncrementalSyncGap = Duration(minutes: 10);
+  static const Duration _fullRefreshInterval = Duration(hours: 12);
+  static Future<List<EventRecord>>? _inFlightSync;
+  static bool _inFlightSyncIncludesSideEffects = false;
+
   static Future<List<EventRecord>> loadCachedForCurrentUser() async {
     final cached = await EventCacheService.readCachedEvents();
     return _filterByUserContext(cached);
@@ -15,40 +21,91 @@ class EventSyncService {
     bool forceFull = false,
     bool sideEffects = true,
   }) async {
+    final Future<List<EventRecord>>? inFlight = _inFlightSync;
+    if (inFlight != null) {
+      final List<EventRecord> result = await inFlight;
+      if (sideEffects && !_inFlightSyncIncludesSideEffects) {
+        await _applySideEffects(result);
+      }
+      return result;
+    }
+
+    _inFlightSyncIncludesSideEffects = sideEffects;
+    final Future<List<EventRecord>> syncFuture = _runSyncEvents(
+      forceFull: forceFull,
+      sideEffects: sideEffects,
+    );
+    _inFlightSync = syncFuture;
+
+    try {
+      return await syncFuture;
+    } finally {
+      if (identical(_inFlightSync, syncFuture)) {
+        _inFlightSync = null;
+        _inFlightSyncIncludesSideEffects = false;
+      }
+    }
+  }
+
+  static Future<List<EventRecord>> _runSyncEvents({
+    required bool forceFull,
+    required bool sideEffects,
+  }) async {
     if (Firebase.apps.isEmpty) {
       return loadCachedForCurrentUser();
     }
 
-    final cached = await EventCacheService.readCachedEvents();
-    if (sideEffects) {
-      final List<EventRecord> filteredCached = await _filterByUserContext(
-        cached,
-      );
-      await NotificationService.scheduleEventReminders(filteredCached);
-    }
-    final List<EventRecord> remote;
+    final List<EventRecord> cached = await EventCacheService.readCachedEvents();
+    final List<EventRecord> filteredCached = await _filterByUserContext(cached);
+    final int lastSyncMillis = await EventCacheService.readLastSyncMillis();
+    final int nowMillis = DateTime.now().millisecondsSinceEpoch;
 
-    try {
-      remote = await _fetchRemoteEvents(forceFull: true, lastSyncMillis: 0);
-      final remoteList = remote..sort((a, b) => a.date.compareTo(b.date));
-      await EventCacheService.saveCachedEvents(remoteList);
-      await EventCacheService.saveLastSyncMillis(
-        DateTime.now().millisecondsSinceEpoch,
-      );
-    } catch (_) {
-      final filteredCached = await _filterByUserContext(cached);
-      await HomeWidgetService.updateUpcomingEventsWidget(filteredCached);
+    if (!forceFull &&
+        cached.isNotEmpty &&
+        _isRecentSync(lastSyncMillis, nowMillis)) {
+      if (sideEffects) {
+        await _applySideEffects(filteredCached);
+      }
       return filteredCached;
     }
 
-    final filtered = await _filterByUserContext(remote);
+    final bool shouldFullRefresh =
+        forceFull ||
+        cached.isEmpty ||
+        lastSyncMillis == 0 ||
+        _isFullRefreshDue(lastSyncMillis, nowMillis);
 
-    if (sideEffects) {
-      await NotificationService.scheduleEventReminders(filtered);
+    debugPrint(
+      'Event sync started. fullRefresh=$shouldFullRefresh cached=${cached.length}',
+    );
+
+    final List<EventRecord> remote;
+    try {
+      remote = await _fetchRemoteEvents(
+        forceFull: shouldFullRefresh,
+        lastSyncMillis: lastSyncMillis,
+      );
+
+      final List<EventRecord> nextCache = shouldFullRefresh
+          ? _sortRecords(remote)
+          : _mergeRecords(cached, remote);
+
+      await EventCacheService.saveCachedEvents(nextCache);
+      await EventCacheService.saveLastSyncMillis(nowMillis);
+
+      final List<EventRecord> filtered = await _filterByUserContext(nextCache);
+      if (sideEffects) {
+        await _applySideEffects(filtered);
+      }
+      return filtered;
+    } catch (_) {
+      if (sideEffects) {
+        await _applySideEffects(filteredCached);
+      } else {
+        await HomeWidgetService.updateUpcomingEventsWidget(filteredCached);
+      }
+      return filteredCached;
     }
-    await HomeWidgetService.updateUpcomingEventsWidget(filtered);
-
-    return filtered;
   }
 
   static Future<List<EventRecord>> _fetchRemoteEvents({
@@ -116,6 +173,39 @@ class EventSyncService {
     }).toList()..sort((a, b) => a.date.compareTo(b.date));
 
     return filtered;
+  }
+
+  static Future<void> _applySideEffects(List<EventRecord> events) async {
+    await NotificationService.scheduleEventReminders(events);
+    await HomeWidgetService.updateUpcomingEventsWidget(events);
+  }
+
+  static bool _isRecentSync(int lastSyncMillis, int nowMillis) {
+    return nowMillis - lastSyncMillis < _minIncrementalSyncGap.inMilliseconds;
+  }
+
+  static bool _isFullRefreshDue(int lastSyncMillis, int nowMillis) {
+    return nowMillis - lastSyncMillis > _fullRefreshInterval.inMilliseconds;
+  }
+
+  static List<EventRecord> _mergeRecords(
+    List<EventRecord> cached,
+    List<EventRecord> incoming,
+  ) {
+    final Map<String, EventRecord> merged = <String, EventRecord>{
+      for (final EventRecord record in cached) record.id: record,
+    };
+
+    for (final EventRecord record in incoming) {
+      merged[record.id] = record;
+    }
+
+    return _sortRecords(merged.values.toList());
+  }
+
+  static List<EventRecord> _sortRecords(List<EventRecord> records) {
+    records.sort((a, b) => a.date.compareTo(b.date));
+    return records;
   }
 
   static Map<DateTime, List<String>> toEventMap(List<EventRecord> records) {

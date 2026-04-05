@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:academic_async/models/event_record.dart';
 import 'package:academic_async/services/event_sync_service.dart';
 import 'package:get/get.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -22,16 +23,22 @@ class CalendarController extends GetxController {
   Future<void> _loadCachedThenSync() async {
     isLoading.value = true;
 
-    final cached = await EventSyncService.loadCachedForCurrentUser().timeout(
-      const Duration(seconds: 3),
-      onTimeout: () => const [],
-    );
+    final List<EventRecord> cached =
+        await EventSyncService.loadCachedForCurrentUser().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => const <EventRecord>[],
+        );
     _applyEventMap(EventSyncService.toEventMap(cached));
+    isLoading.value = cached.isEmpty;
 
-    await fetchfromFirebase();
+    unawaited(fetchfromFirebase(showLoader: cached.isEmpty));
   }
 
-  Future<void> fetchfromFirebase() async {
+  Future<void> fetchfromFirebase({bool showLoader = true}) async {
+    if (showLoader) {
+      isLoading.value = true;
+    }
+
     try {
       final synced = await EventSyncService.syncEvents(
         forceFull: false,
