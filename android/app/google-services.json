@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "348474573023",
+    "project_id": "academic-async",
+    "storage_bucket": "academic-async.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:348474573023:android:1e13db3bde7ac96ad4e96a",
+        "android_client_info": {
+          "package_name": "com.parat.academicasync"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAIy_vcbtfz_MDk-kPSYrcg-vf-Di0IibQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
