@@ -1,9 +1,9 @@
 import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/menu_controller.dart';
 import 'package:academic_async/controllers/settings_controller.dart';
-import 'package:academic_async/controllers/update_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:academic_async/widgets/settings/app_update_section.dart';
 import 'package:academic_async/widgets/settings/settings_bottom_sheets.dart';
 import 'package:academic_async/widgets/settings/settings_components.dart';
 
@@ -14,7 +14,6 @@ class SettingsPage extends GetView<SettingsController> {
   Widget build(BuildContext context) {
     final AuthController authController = Get.find<AuthController>();
     final MenuControllerX menuController = Get.find<MenuControllerX>();
-    final UpdateController updateController = Get.find<UpdateController>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -132,180 +131,12 @@ class SettingsPage extends GetView<SettingsController> {
               title: 'Updates',
               subtitle: 'GitHub release based APK updates with ABI matching',
             ),
-            Obx(
-              () => SettingsGroup(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.system_update_alt_rounded),
-                    trailing: updateController.isChecking.value
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.chevron_right_rounded),
-                    title: const Text(
-                      'App Updates',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(
-                      updateController.errorMessage.value ??
-                          (updateController.statusMessage.value.isNotEmpty
-                              ? updateController.statusMessage.value
-                              : 'Current: ${updateController.currentVersionLabel.value}'),
-                    ),
-                    onTap: updateController.isChecking.value
-                        ? null
-                        : () => updateController.checkForUpdates(),
-                  ),
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Installed: ${updateController.currentVersionLabel.value}',
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Device ABI: ${updateController.deviceAbiLabel.value}',
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Latest release: ${updateController.latestVersionLabel}',
-                        ),
-                        if (updateController.latestRelease.value != null) ...[
-                          if (updateController.latestRelease.value!.assetName
-                              .trim()
-                              .isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Selected APK: ${updateController.latestRelease.value!.assetName}',
-                            ),
-                          ],
-                          const SizedBox(height: 4),
-                          Text(
-                            updateController
-                                .latestRelease
-                                .value!
-                                .selectionLabel,
-                          ),
-                        ],
-                        if (updateController.latestRelease.value?.publishedAt !=
-                            null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              'Published: ${_formatUpdateDate(updateController.latestRelease.value!.publishedAt!)}',
-                            ),
-                          ),
-                        if (updateController.isDownloading.value) ...[
-                          const SizedBox(height: 12),
-                          LinearProgressIndicator(
-                            value: updateController.downloadProgress.value <= 0
-                                ? null
-                                : updateController.downloadProgress.value,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            updateController.downloadProgress.value <= 0
-                                ? 'Downloading update...'
-                                : 'Downloading ${(updateController.downloadProgress.value * 100).round()}%',
-                          ),
-                        ],
-                        if (updateController.latestRelease.value?.releaseNotes
-                                .trim()
-                                .isNotEmpty ==
-                            true) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Release notes',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _shortReleaseNotes(
-                              updateController
-                                  .latestRelease
-                                  .value!
-                                  .releaseNotes,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            FilledButton.tonalIcon(
-                              onPressed: updateController.isChecking.value
-                                  ? null
-                                  : () => updateController.checkForUpdates(),
-                              icon: const Icon(Icons.refresh_rounded),
-                              label: const Text('Check now'),
-                            ),
-                            if (updateController.isUpdateAvailable)
-                              FilledButton.icon(
-                                onPressed: updateController.isDownloading.value
-                                    ? null
-                                    : updateController.downloadAndInstallUpdate,
-                                icon: Icon(
-                                  updateController.supportsInAppInstall
-                                      ? Icons.download_for_offline_rounded
-                                      : Icons.open_in_new_rounded,
-                                ),
-                                label: Text(
-                                  updateController.supportsInAppInstall &&
-                                          updateController.hasDownloadAsset
-                                      ? 'Download & Install'
-                                      : 'Open Release',
-                                ),
-                              ),
-                            if (updateController.latestRelease.value != null)
-                              OutlinedButton.icon(
-                                onPressed: updateController.openReleasePage,
-                                icon: const Icon(Icons.open_in_new_rounded),
-                                label: const Text('Release page'),
-                              ),
-                          ],
-                        ),
-                        if (!updateController.supportsInAppInstall) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'In-app APK install is supported on Android only. Other platforms will open the release page.',
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const AppUpdateSection(),
           ],
         ),
       ),
     );
   }
-}
-
-String _shortReleaseNotes(String raw) {
-  final List<String> lines = raw
-      .trim()
-      .split('\n')
-      .map((line) => line.trim())
-      .where((line) => line.isNotEmpty)
-      .take(5)
-      .toList();
-  return lines.join('\n');
-}
-
-String _formatUpdateDate(DateTime value) {
-  final DateTime local = value.toLocal();
-  final String year = local.year.toString().padLeft(4, '0');
-  final String month = local.month.toString().padLeft(2, '0');
-  final String day = local.day.toString().padLeft(2, '0');
-  return '$year-$month-$day';
 }
 
 void _showAboutDialog(BuildContext context) {

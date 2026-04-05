@@ -63,7 +63,12 @@ class SyllabusPage extends GetView<SyllabusController> {
         onRefresh: controller.refreshData,
         child: ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.fromLTRB(
+            12,
+            12,
+            12,
+            _syllabusPageBottomPadding(context),
+          ),
           itemCount: controller.visibleItems.length,
           separatorBuilder: (context, index) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
@@ -129,4 +134,9 @@ class SyllabusPage extends GetView<SyllabusController> {
       );
     });
   }
+}
+
+double _syllabusPageBottomPadding(BuildContext context) {
+  final double safeBottom = MediaQuery.of(context).viewPadding.bottom;
+  return safeBottom + 128;
 }

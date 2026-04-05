@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:academic_async/config/app_update_config.dart';
+import 'package:academic_async/models/app_update_models.dart';
 import 'package:academic_async/services/app_update_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -26,10 +27,19 @@ class UpdateController extends GetxController {
   bool get supportsInAppInstall => AppUpdateService.isAndroidSideloadSupported;
   bool get isUpdateAvailable => latestRelease.value?.isNewerThanCurrent == true;
   bool get hasDownloadAsset => latestRelease.value?.hasDownloadAsset == true;
+  bool get hasReleaseNotes =>
+      normalizedReleaseNotes(latestRelease.value?.releaseNotes ?? '').isNotEmpty;
   String get latestVersionLabel =>
       latestRelease.value?.versionTag.trim().isNotEmpty == true
       ? latestRelease.value!.versionTag
       : 'Not checked yet';
+  String get publishedAtLabel {
+    final DateTime? publishedAt = latestRelease.value?.publishedAt;
+    if (publishedAt == null) {
+      return '';
+    }
+    return formatUpdateDate(publishedAt);
+  }
 
   @override
   void onInit() {
@@ -210,7 +220,7 @@ class UpdateController extends GetxController {
     }
 
     _didPromptThisSession = true;
-    final String releaseNotes = _trimReleaseNotes(release.releaseNotes);
+    final String releaseNotes = summarizedReleaseNotes(release.releaseNotes);
     await Get.dialog<void>(
       AlertDialog(
         title: const Text('Update Available'),
@@ -281,8 +291,12 @@ class UpdateController extends GetxController {
     );
   }
 
-  String _trimReleaseNotes(String raw) {
-    final String trimmed = raw.trim();
+  String normalizedReleaseNotes(String raw) {
+    return raw.replaceAll('\r\n', '\n').trim();
+  }
+
+  String summarizedReleaseNotes(String raw, {int maxLines = 6}) {
+    final String trimmed = normalizedReleaseNotes(raw);
     if (trimmed.isEmpty) {
       return '';
     }
@@ -290,8 +304,16 @@ class UpdateController extends GetxController {
         .split('\n')
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
-        .take(6)
+        .take(maxLines)
         .toList();
     return lines.join('\n');
+  }
+
+  String formatUpdateDate(DateTime value) {
+    final DateTime local = value.toLocal();
+    final String year = local.year.toString().padLeft(4, '0');
+    final String month = local.month.toString().padLeft(2, '0');
+    final String day = local.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
   }
 }
