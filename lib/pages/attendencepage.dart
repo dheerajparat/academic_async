@@ -529,6 +529,8 @@ class _TeacherAttendanceView extends StatelessWidget {
                 title: 'Marked Students',
                 subtitle:
                     'Every valid attendance mark is listed here. Remove only incorrect entries before final submit.',
+                collapsible: true,
+                initiallyExpanded: false,
                 child: controller.selectedTeacherSessionStudents.isEmpty
                     ? _EmptySectionState(
                         colors: colors,
@@ -615,6 +617,8 @@ class _TeacherAttendanceView extends StatelessWidget {
               title: 'Subject-wise Report',
               subtitle:
                   'Track how many sessions were created and the average turnout per subject.',
+              collapsible: true,
+              initiallyExpanded: false,
               trailing: Wrap(
                 spacing: 4,
                 children: [
@@ -669,6 +673,8 @@ class _TeacherAttendanceView extends StatelessWidget {
               title: 'Session History',
               subtitle:
                   'Tap any session to inspect its details and marked students.',
+              collapsible: true,
+              initiallyExpanded: false,
               child: controller.teacherSessions.isEmpty
                   ? _EmptySectionState(
                       colors: colors,
@@ -1263,7 +1269,7 @@ class _AttendanceHeroBanner extends StatelessWidget {
   }
 }
 
-class _AttendancePanel extends StatelessWidget {
+class _AttendancePanel extends StatefulWidget {
   const _AttendancePanel({
     required this.colors,
     required this.icon,
@@ -1271,6 +1277,8 @@ class _AttendancePanel extends StatelessWidget {
     required this.child,
     this.subtitle,
     this.trailing,
+    this.collapsible = false,
+    this.initiallyExpanded = true,
   });
 
   final ColorScheme colors;
@@ -1279,20 +1287,45 @@ class _AttendancePanel extends StatelessWidget {
   final String? subtitle;
   final Widget? trailing;
   final Widget child;
+  final bool collapsible;
+  final bool initiallyExpanded;
+
+  @override
+  State<_AttendancePanel> createState() => _AttendancePanelState();
+}
+
+class _AttendancePanelState extends State<_AttendancePanel>
+    with SingleTickerProviderStateMixin {
+  late bool _isExpanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _isExpanded = widget.collapsible ? widget.initiallyExpanded : true;
+  }
+
+  @override
+  void didUpdateWidget(covariant _AttendancePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.collapsible && _isExpanded != true) {
+      _isExpanded = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final bool showBody = !widget.collapsible || _isExpanded;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colors.surface.withValues(alpha: 0.94),
+        color: widget.colors.surface.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(26),
         border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.40),
+          color: widget.colors.outlineVariant.withValues(alpha: 0.40),
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.04),
+            color: widget.colors.shadow.withValues(alpha: 0.04),
             blurRadius: 22,
             offset: const Offset(0, 12),
           ),
@@ -1301,57 +1334,97 @@ class _AttendancePanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      colors.primary.withValues(alpha: 0.20),
-                      colors.secondary.withValues(alpha: 0.08),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: colors.primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: widget.collapsible
+                  ? () => setState(() => _isExpanded = !_isExpanded)
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: colors.onSurface,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 17,
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            widget.colors.primary.withValues(alpha: 0.20),
+                            widget.colors.secondary.withValues(alpha: 0.08),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Icon(widget.icon, color: widget.colors.primary),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: TextStyle(
+                              color: widget.colors.onSurface,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 17,
+                            ),
+                          ),
+                          if (widget.subtitle != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.subtitle!,
+                              style: TextStyle(
+                                color: widget.colors.onSurfaceVariant,
+                                fontSize: 12.5,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle!,
-                        style: TextStyle(
-                          color: colors.onSurfaceVariant,
-                          fontSize: 12.5,
-                          height: 1.4,
-                        ),
+                    if (widget.trailing != null || widget.collapsible) ...[
+                      const SizedBox(width: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.trailing != null) widget.trailing!,
+                          if (widget.collapsible)
+                            AnimatedRotation(
+                              turns: _isExpanded ? 0.5 : 0,
+                              duration: const Duration(milliseconds: 180),
+                              child: IconButton(
+                                tooltip: _isExpanded ? 'Collapse' : 'Expand',
+                                onPressed: () =>
+                                    setState(() => _isExpanded = !_isExpanded),
+                                icon: const Icon(Icons.expand_more_rounded),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ],
                 ),
               ),
-              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            ],
+            ),
           ),
-          const SizedBox(height: 18),
-          child,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            alignment: Alignment.topCenter,
+            child: showBody
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 18),
+                    child: widget.child,
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
