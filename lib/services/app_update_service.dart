@@ -22,6 +22,7 @@ class AppUpdateService {
   static const MethodChannel _channel = MethodChannel(
     'academic_async/update_installer',
   );
+  static const String _updatesDirectoryName = 'updates';
 
   static bool get isAndroidSideloadSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -140,13 +141,14 @@ class AppUpdateService {
     }
 
     final Directory updatesDir = Directory(
-      '${Directory.systemTemp.path}/updates',
+      await _resolveUpdateStorageDirectoryPath(),
     );
     if (!updatesDir.existsSync()) {
       await updatesDir.create(recursive: true);
     }
 
-    final File file = File('${updatesDir.path}/${release.assetName}');
+    final String assetName = _sanitizeFileName(release.assetName);
+    final File file = File('${updatesDir.path}/$assetName');
     if (file.existsSync()) {
       await file.delete();
     }
@@ -229,6 +231,41 @@ class AppUpdateService {
           : url,
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  static Future<String> _resolveUpdateStorageDirectoryPath() async {
+    if (!isAndroidSideloadSupported) {
+      return '${Directory.systemTemp.path}/$_updatesDirectoryName';
+    }
+
+    try {
+      final String? path = await _channel.invokeMethod<String>(
+        'getUpdateStorageDir',
+      );
+      final String normalized = (path ?? '').trim();
+      if (normalized.isNotEmpty) {
+        return normalized;
+      }
+    } on MissingPluginException {
+      debugPrint('Update installer channel missing getUpdateStorageDir');
+    } on PlatformException catch (error) {
+      debugPrint('Update storage path lookup failed: ${error.message}');
+    }
+
+    return '${Directory.systemTemp.path}/$_updatesDirectoryName';
+  }
+
+  static String _sanitizeFileName(String value) {
+    final String trimmed = value.trim();
+    final String fallback = AppUpdateConfig.apkAssetName.trim().isNotEmpty
+        ? AppUpdateConfig.apkAssetName.trim()
+        : 'app-update.apk';
+    final String candidate = trimmed.isEmpty ? fallback : trimmed;
+    final String normalized = candidate.replaceAll(
+      RegExp(r'[\\/:*?"<>|]'),
+      '_',
+    );
+    return normalized.isEmpty ? 'app-update.apk' : normalized;
   }
 
   static bool _isRemoteVersionNewer(String currentRaw, String remoteRaw) {

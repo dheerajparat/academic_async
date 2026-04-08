@@ -1,3 +1,4 @@
+import 'package:academic_async/controllers/attendance_controller.dart';
 import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/get_user_data.dart';
 import 'package:academic_async/controllers/home_controller.dart';
@@ -17,6 +18,8 @@ class Homepage extends GetView<HomeController> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AuthController authController = Get.find<AuthController>();
+    final AttendanceController attendanceController =
+        Get.find<AttendanceController>();
     Get.find<UpdateController>();
     final bool isDarkMode = theme.brightness == Brightness.dark;
     final Color accentColor = theme.colorScheme.primary;
@@ -33,88 +36,146 @@ class Homepage extends GetView<HomeController> {
       final int selectedIndex = controller.currentIndex.value;
       final List<BottomNavItem> navItems = controller.navItems;
       final bool isDeveloper = userDataController.isDeveloper;
+      final bool attendanceLockActive =
+          attendanceController.isAttendanceLockActive;
+      final int lockSecondsLeft =
+          attendanceController.attendanceLockSecondsLeft;
+      final String lockDurationLabel =
+          attendanceController.attendanceLockDurationLabel;
 
-      return Scaffold(
-        extendBodyBehindAppBar: true,
-        extendBody: true,
-        drawer: _DrawerForAll(
-          cardColor: cardColor,
-          accentColor: accentColor,
-          isDarkMode: isDarkMode,
-          textColor: textColor,
-          title: userDataController.name.value.isNotEmpty
-              ? 'Hello, ${userDataController.name.value}!'
-              : 'Hello, Student!',
-          email: userDataController.email.value,
-          regNum: userDataController.registrationNo.value,
-          branch: userDataController.branch.value,
-          semester: userDataController.semester.value,
-          role: userDataController.role.value,
-          currentIndex: selectedIndex,
-          isDeveloper: isDeveloper,
-        ),
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Text(
-            navItems[selectedIndex].label,
-            style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+      return PopScope(
+        canPop: !attendanceLockActive,
+        onPopInvokedWithResult: (bool didPop, Object? result) {
+          if (!didPop && attendanceLockActive) {
+            attendanceController.showAttendanceLockMessage(
+              actionLabel: 'exiting the app',
+            );
+          }
+        },
+        child: Scaffold(
+          extendBodyBehindAppBar: true,
+          extendBody: true,
+          drawer: _DrawerForAll(
+            cardColor: cardColor,
+            accentColor: accentColor,
+            isDarkMode: isDarkMode,
+            textColor: textColor,
+            title: userDataController.name.value.isNotEmpty
+                ? 'Hello, ${userDataController.name.value}!'
+                : 'Hello, Student!',
+            email: userDataController.email.value,
+            regNum: userDataController.registrationNo.value,
+            branch: userDataController.branch.value,
+            semester: userDataController.semester.value,
+            role: userDataController.role.value,
+            currentIndex: selectedIndex,
+            isDeveloper: isDeveloper,
           ),
-          iconTheme: IconThemeData(color: textColor),
-          actions: [
-            if (isDeveloper)
-              IconButton(
-                tooltip: 'Developer mode',
-                icon: Icon(
-                  Icons.admin_panel_settings_rounded,
-                  color: accentColor,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: Text(
+              navItems[selectedIndex].label,
+              style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+            ),
+            iconTheme: IconThemeData(color: textColor),
+            actions: [
+              if (isDeveloper)
+                IconButton(
+                  tooltip: 'Developer mode',
+                  icon: Icon(
+                    Icons.admin_panel_settings_rounded,
+                    color: accentColor,
+                  ),
+                  onPressed: () {
+                    Get.to(() => const DeveloperAdminPage());
+                  },
                 ),
+              IconButton(
+                icon: Icon(Icons.logout, color: accentColor),
                 onPressed: () {
-                  Get.to(() => const DeveloperAdminPage());
+                  if (!attendanceController.canPerformProtectedAction(
+                    actionLabel: 'logging out',
+                  )) {
+                    return;
+                  }
+                  Get.defaultDialog(
+                    title: 'Logout',
+                    middleText: 'Are you sure you want to logout?',
+                    textCancel: 'Cancel',
+                    textConfirm: 'Logout',
+                    confirmTextColor: Theme.of(context).colorScheme.onPrimary,
+                    onConfirm: () {
+                      if (!attendanceController.canPerformProtectedAction(
+                        actionLabel: 'logging out',
+                      )) {
+                        Get.back();
+                        return;
+                      }
+                      authController.signOut();
+                      Get.back();
+                    },
+                  );
                 },
               ),
-            IconButton(
-              icon: Icon(Icons.logout, color: accentColor),
-              onPressed: () {
-                Get.defaultDialog(
-                  title: 'Logout',
-                  middleText: 'Are you sure you want to logout?',
-                  textCancel: 'Cancel',
-                  textConfirm: 'Logout',
-                  confirmTextColor: Theme.of(context).colorScheme.onPrimary,
-                  onConfirm: () {
-                    authController.signOut();
-                    Get.back();
-                  },
-                );
-              },
+            ],
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accentColor.withValues(alpha: isDarkMode ? 0.1 : 0.9),
+                  scaffoldGradientEnd,
+                ],
+              ),
             ),
-          ],
-        ),
-        body: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                accentColor.withValues(alpha: isDarkMode ? 0.1 : 0.9),
-                scaffoldGradientEnd,
-              ],
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Column(
+                  children: [
+                    if (attendanceLockActive)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          lockSecondsLeft > 0
+                              ? 'Attendance live hai. $lockDurationLabel tak app exit/logout lock rahega.'
+                              : 'Attendance live hai. App exit/logout temporary lock hai.',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    Expanded(child: controller.pages[selectedIndex]),
+                  ],
+                ),
+              ),
             ),
           ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: controller.pages[selectedIndex],
-            ),
+          bottomNavigationBar: CustomBottomNav(
+            bottomBarColor: bottomBarColor,
+            isDarkMode: isDarkMode,
+            navItems: navItems,
+            accentColor: accentColor,
           ),
-        ),
-        bottomNavigationBar: CustomBottomNav(
-          bottomBarColor: bottomBarColor,
-          isDarkMode: isDarkMode,
-          navItems: navItems,
-          accentColor: accentColor,
         ),
       );
     });

@@ -4,10 +4,11 @@ import 'dart:io';
 import 'package:academic_async/config/app_update_config.dart';
 import 'package:academic_async/models/app_update_models.dart';
 import 'package:academic_async/services/app_update_service.dart';
+import 'package:academic_async/widgets/markdownview.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class UpdateController extends GetxController {
+class UpdateController extends GetxController with WidgetsBindingObserver {
   final Rxn<AppReleaseInfo> latestRelease = Rxn<AppReleaseInfo>();
   final RxString currentVersionLabel = 'Loading...'.obs;
   final RxString deviceAbiLabel = 'Detecting...'.obs;
@@ -22,13 +23,16 @@ class UpdateController extends GetxController {
   String _downloadedFilePath = '';
   String _downloadedAssetName = '';
   bool _didPromptThisSession = false;
+  bool _isAwaitingInstallPermission = false;
+  bool _isOpeningInstaller = false;
 
   bool get isConfigured => AppUpdateConfig.isConfigured;
   bool get supportsInAppInstall => AppUpdateService.isAndroidSideloadSupported;
   bool get isUpdateAvailable => latestRelease.value?.isNewerThanCurrent == true;
   bool get hasDownloadAsset => latestRelease.value?.hasDownloadAsset == true;
-  bool get hasReleaseNotes =>
-      normalizedReleaseNotes(latestRelease.value?.releaseNotes ?? '').isNotEmpty;
+  bool get hasReleaseNotes => normalizedReleaseNotes(
+    latestRelease.value?.releaseNotes ?? '',
+  ).isNotEmpty;
   String get latestVersionLabel =>
       latestRelease.value?.versionTag.trim().isNotEmpty == true
       ? latestRelease.value!.versionTag
@@ -44,7 +48,21 @@ class UpdateController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_bootstrap());
+  }
+
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_resumePendingInstallIfAllowed());
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -157,6 +175,7 @@ class UpdateController extends GetxController {
     statusMessage.value = 'Downloading ${release.assetName}...';
     isDownloading.value = true;
     downloadProgress.value = 0;
+    _isAwaitingInstallPermission = false;
 
     try {
       final String apkPath;
@@ -178,10 +197,14 @@ class UpdateController extends GetxController {
       statusMessage.value = 'Download complete. Opening installer...';
       await _installDownloadedApk(apkPath);
     } catch (error) {
-      errorMessage.value = error is AppUpdatePermissionRequiredException
-          ? 'Allow app installs from this source, then tap update again'
-          : 'Unable to download or install the update';
-      statusMessage.value = '';
+      if (error is AppUpdatePermissionRequiredException) {
+        errorMessage.value =
+            'Allow app installs from this source and return to the app. The installer will open automatically.';
+        statusMessage.value = 'Waiting for install permission...';
+      } else {
+        errorMessage.value = 'Unable to download or install the update';
+        statusMessage.value = '';
+      }
       debugPrint('Update download/install failed: $error');
     } finally {
       isDownloading.value = false;
@@ -194,20 +217,61 @@ class UpdateController extends GetxController {
   }
 
   Future<void> _installDownloadedApk(String apkPath) async {
+    if (_isOpeningInstaller) {
+      return;
+    }
+
     try {
       final bool canInstall =
           await AppUpdateService.canRequestPackageInstalls();
       if (!canInstall) {
+        _isAwaitingInstallPermission = true;
         await _showInstallPermissionDialog();
         throw const AppUpdatePermissionRequiredException();
       }
+      _isAwaitingInstallPermission = false;
+      _isOpeningInstaller = true;
+      errorMessage.value = null;
       await AppUpdateService.installDownloadedApk(apkPath);
+      statusMessage.value =
+          'Installer opened. Confirm the install to finish updating.';
       Get.snackbar(
         'Update',
         'Android installer opened. Confirm the install to finish updating.',
       );
     } on AppUpdatePermissionRequiredException {
       rethrow;
+    } finally {
+      _isOpeningInstaller = false;
+    }
+  }
+
+  Future<void> _resumePendingInstallIfAllowed() async {
+    if (!_isAwaitingInstallPermission ||
+        _downloadedFilePath.trim().isEmpty ||
+        _isOpeningInstaller) {
+      return;
+    }
+
+    final File apkFile = File(_downloadedFilePath);
+    if (!apkFile.existsSync()) {
+      _isAwaitingInstallPermission = false;
+      return;
+    }
+
+    final bool canInstall = await AppUpdateService.canRequestPackageInstalls();
+    if (!canInstall) {
+      return;
+    }
+
+    errorMessage.value = null;
+    statusMessage.value = 'Permission granted. Opening installer...';
+    try {
+      await _installDownloadedApk(_downloadedFilePath);
+    } catch (error) {
+      errorMessage.value = 'Unable to open the installer after permission';
+      statusMessage.value = '';
+      debugPrint('Pending install resume failed: $error');
     }
   }
 
@@ -220,27 +284,34 @@ class UpdateController extends GetxController {
     }
 
     _didPromptThisSession = true;
-    final String releaseNotes = summarizedReleaseNotes(release.releaseNotes);
+    final BuildContext context = Get.context!;
+    final String releaseNotes = normalizedReleaseNotes(release.releaseNotes);
+    final double maxDialogHeight = MediaQuery.sizeOf(context).height * 0.6;
     await Get.dialog<void>(
       AlertDialog(
         title: const Text('Update Available'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Current version: ${currentVersionLabel.value}\nLatest version: ${release.versionTag}',
+        content: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxDialogHeight),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current version: ${currentVersionLabel.value}\nLatest version: ${release.versionTag}',
+                ),
+                if (releaseNotes.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'What changed',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  MarkdownView(data: releaseNotes),
+                ],
+              ],
             ),
-            if (releaseNotes.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'What changed',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 6),
-              Text(releaseNotes),
-            ],
-          ],
+          ),
         ),
         actions: [
           TextButton(
@@ -271,7 +342,7 @@ class UpdateController extends GetxController {
       AlertDialog(
         title: const Text('Allow App Install'),
         content: const Text(
-          'Android needs permission to install the downloaded APK from this app source. Open settings, allow the permission, then come back and tap update again.',
+          'Android needs permission to install the downloaded APK from this app source. Open settings, allow the permission, then return to the app. The installer will continue automatically.',
         ),
         actions: [
           TextButton(

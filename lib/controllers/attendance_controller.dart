@@ -4,6 +4,7 @@ import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/get_user_data.dart';
 import 'package:academic_async/models/attendance_models.dart';
 import 'package:academic_async/services/attendance_location_service.dart';
+import 'package:academic_async/services/attendance_lock_service.dart';
 import 'package:academic_async/services/attendance_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -68,6 +69,12 @@ class AttendanceController extends GetxController {
   Worker? _userContextWatcher;
   String _autoCleanupSessionId = '';
   String _lastStudentContextKey = '';
+  int _lastLockSnackbarMillis = 0;
+  int _lastDeviceLockFailureMessageMillis = 0;
+  int _lastDeviceLockSyncMillis = 0;
+  bool _isEnforcingDeviceLock = false;
+  bool? _pendingDeviceLockState;
+  bool? _lastSyncedDeviceLockState;
 
   AuthController? _authController;
   UserDataController? _userDataController;
@@ -194,6 +201,125 @@ class AttendanceController extends GetxController {
     return !entry.isFinalized && activeQrSecondsLeft.value > 0;
   }
 
+  bool get hasLiveStudentSession {
+    for (final AttendanceEntry session in availableStudentSessions) {
+      if (!session.isFinalized &&
+          session.validUntilMillis > liveClockMillis.value) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool get hasLiveTeacherSession {
+    for (final AttendanceEntry session in teacherSessions) {
+      if (!session.isFinalized &&
+          session.validUntilMillis > liveClockMillis.value) {
+        return true;
+      }
+    }
+
+    final AttendanceEntry? active = activeEntry.value;
+    if (active != null &&
+        !active.isFinalized &&
+        active.validUntilMillis > liveClockMillis.value) {
+      return true;
+    }
+    return false;
+  }
+
+  bool get isAttendanceLockActive {
+    if (isTeacher.value) {
+      return hasLiveTeacherSession;
+    }
+    return hasLiveStudentSession;
+  }
+
+  int get attendanceLockSecondsLeft {
+    if (!isAttendanceLockActive) {
+      return 0;
+    }
+    if (isTeacher.value) {
+      int maxSecondsLeft = 0;
+      for (final AttendanceEntry session in teacherSessions) {
+        if (session.isFinalized) {
+          continue;
+        }
+        final int millisLeft = session.validUntilMillis - liveClockMillis.value;
+        if (millisLeft <= 0) {
+          continue;
+        }
+        final int secondsLeft = (millisLeft / 1000).ceil();
+        if (secondsLeft > maxSecondsLeft) {
+          maxSecondsLeft = secondsLeft;
+        }
+      }
+
+      final AttendanceEntry? active = activeEntry.value;
+      if (active != null && !active.isFinalized) {
+        final int activeMillisLeft =
+            active.validUntilMillis - liveClockMillis.value;
+        if (activeMillisLeft > 0) {
+          final int activeSecondsLeft = (activeMillisLeft / 1000).ceil();
+          if (activeSecondsLeft > maxSecondsLeft) {
+            maxSecondsLeft = activeSecondsLeft;
+          }
+        }
+      }
+      return maxSecondsLeft;
+    }
+
+    int maxSecondsLeft = 0;
+    for (final AttendanceEntry session in availableStudentSessions) {
+      if (session.isFinalized) {
+        continue;
+      }
+      final int millisLeft = session.validUntilMillis - liveClockMillis.value;
+      if (millisLeft <= 0) {
+        continue;
+      }
+      final int secondsLeft = (millisLeft / 1000).ceil();
+      if (secondsLeft > maxSecondsLeft) {
+        maxSecondsLeft = secondsLeft;
+      }
+    }
+    return maxSecondsLeft;
+  }
+
+  String get attendanceLockDurationLabel =>
+      _formatDuration(attendanceLockSecondsLeft);
+
+  bool canPerformProtectedAction({
+    String actionLabel = 'leaving the app',
+    bool showMessage = true,
+  }) {
+    if (!isAttendanceLockActive) {
+      return true;
+    }
+    if (showMessage) {
+      showAttendanceLockMessage(actionLabel: actionLabel);
+    }
+    return false;
+  }
+
+  void showAttendanceLockMessage({String actionLabel = 'leaving the app'}) {
+    final int nowMillis = DateTime.now().millisecondsSinceEpoch;
+    if (nowMillis - _lastLockSnackbarMillis < 1200) {
+      return;
+    }
+    _lastLockSnackbarMillis = nowMillis;
+
+    final int secondsLeft = attendanceLockSecondsLeft;
+    final String message = secondsLeft > 0
+        ? 'Live attendance active. Wait ${_formatDuration(secondsLeft)} before $actionLabel.'
+        : 'Live attendance active. You cannot $actionLabel right now.';
+    Get.snackbar(
+      'Attendance lock',
+      message,
+      snackPosition: SnackPosition.BOTTOM,
+    );
+  }
+
   static const double attendanceRadiusMeters = 50;
 
   List<int> get qrValidityMinuteOptions => const <int>[1, 2, 3, 5, 10, 15];
@@ -293,10 +419,12 @@ class AttendanceController extends GetxController {
     }
 
     unawaited(initialize());
+    unawaited(_enforceDeviceAttendanceLock());
   }
 
   @override
   void onClose() {
+    unawaited(AttendanceLockService.setAttendanceLock(false));
     _authWatcher?.dispose();
     _userContextWatcher?.dispose();
     _activeEntrySub?.cancel();
@@ -346,6 +474,7 @@ class AttendanceController extends GetxController {
       errorMessage.value = 'Unable to load attendance configuration.';
     } finally {
       isBootstrapping.value = false;
+      unawaited(_enforceDeviceAttendanceLock());
     }
   }
 
@@ -1257,6 +1386,7 @@ class AttendanceController extends GetxController {
     final String semesterId = _userDataController?.semesterId.value ?? '';
     if (uid.isEmpty || branchId.trim().isEmpty || semesterId.trim().isEmpty) {
       availableStudentSessions.clear();
+      unawaited(_enforceDeviceAttendanceLock());
       return;
     }
 
@@ -1268,6 +1398,7 @@ class AttendanceController extends GetxController {
           studentSubjects: studentSubjects.toList(),
         ).listen((List<AttendanceEntry> sessions) {
           availableStudentSessions.assignAll(sessions);
+          unawaited(_enforceDeviceAttendanceLock());
         });
   }
 
@@ -1275,6 +1406,7 @@ class AttendanceController extends GetxController {
     _studentAvailableSessionsSub?.cancel();
     _studentAvailableSessionsSub = null;
     availableStudentSessions.clear();
+    unawaited(_enforceDeviceAttendanceLock());
   }
 
   void _unbindActiveEntry() {
@@ -1321,14 +1453,17 @@ class AttendanceController extends GetxController {
     final AttendanceEntry? activeSession = _findLiveSession(sessions);
     if (activeSession == null) {
       _unbindActiveEntry();
+      unawaited(_enforceDeviceAttendanceLock());
       return;
     }
 
     if (activeEntry.value?.id == activeSession.id && _activeEntrySub != null) {
       _syncQrTimer();
+      unawaited(_enforceDeviceAttendanceLock());
       return;
     }
     _bindActiveEntry(activeSession.id);
+    unawaited(_enforceDeviceAttendanceLock());
   }
 
   AttendanceEntry? _findLiveSession(List<AttendanceEntry> sessions) {
@@ -1363,6 +1498,7 @@ class AttendanceController extends GetxController {
     final entry = activeEntry.value;
     if (entry == null || entry.isFinalized) {
       activeQrSecondsLeft.value = 0;
+      unawaited(_enforceDeviceAttendanceLock());
       return;
     }
     final int validUntilMillis =
@@ -1381,10 +1517,12 @@ class AttendanceController extends GetxController {
           ),
         );
       }
+      unawaited(_enforceDeviceAttendanceLock());
       return;
     }
     _autoCleanupSessionId = '';
     activeQrSecondsLeft.value = (millisLeft / 1000).ceil();
+    unawaited(_enforceDeviceAttendanceLock());
   }
 
   bool _shouldAutoDeleteEmptySession(AttendanceEntry entry) {
@@ -1398,6 +1536,7 @@ class AttendanceController extends GetxController {
     liveClockMillis.value = DateTime.now().millisecondsSinceEpoch;
     _liveClockTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       liveClockMillis.value = DateTime.now().millisecondsSinceEpoch;
+      unawaited(_enforceDeviceAttendanceLock());
     });
   }
 
@@ -1456,6 +1595,56 @@ class AttendanceController extends GetxController {
     _unbindActiveEntry();
     _unbindStudentAvailableSessions();
     _qrTicker?.cancel();
+    unawaited(_enforceDeviceAttendanceLock());
+  }
+
+  Future<void> _enforceDeviceAttendanceLock() async {
+    final bool shouldLock = isAttendanceLockActive;
+    final int nowMillis = DateTime.now().millisecondsSinceEpoch;
+    final bool syncedRecently =
+        _lastSyncedDeviceLockState == shouldLock &&
+        (shouldLock
+            ? nowMillis - _lastDeviceLockSyncMillis < 3000
+            : nowMillis - _lastDeviceLockSyncMillis < 10000);
+    if (syncedRecently) {
+      return;
+    }
+
+    _pendingDeviceLockState = shouldLock;
+    if (_isEnforcingDeviceLock) {
+      return;
+    }
+    _isEnforcingDeviceLock = true;
+    try {
+      while (_pendingDeviceLockState != null) {
+        final bool targetState = _pendingDeviceLockState!;
+        _pendingDeviceLockState = null;
+
+        final bool locked = await AttendanceLockService.setAttendanceLock(
+          targetState,
+        );
+        _lastSyncedDeviceLockState = targetState;
+        _lastDeviceLockSyncMillis = DateTime.now().millisecondsSinceEpoch;
+
+        if (locked || !targetState) {
+          continue;
+        }
+
+        if (_lastDeviceLockSyncMillis - _lastDeviceLockFailureMessageMillis <
+            10000) {
+          continue;
+        }
+        _lastDeviceLockFailureMessageMillis = _lastDeviceLockSyncMillis;
+        Get.snackbar(
+          'Attendance lock warning',
+          'Strict app lock unavailable. Phone settings me Screen Pinning enable karein.',
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 4),
+        );
+      }
+    } finally {
+      _isEnforcingDeviceLock = false;
+    }
   }
 
   String _fileSafeTimestamp(DateTime dateTime) {
@@ -1466,5 +1655,20 @@ class AttendanceController extends GetxController {
     final String minute = dateTime.minute.toString().padLeft(2, '0');
     final String second = dateTime.second.toString().padLeft(2, '0');
     return '$year$month${day}_$hour$minute$second';
+  }
+
+  String _formatDuration(int totalSeconds) {
+    if (totalSeconds <= 0) {
+      return '0s';
+    }
+    final int minutes = totalSeconds ~/ 60;
+    final int seconds = totalSeconds % 60;
+    if (minutes <= 0) {
+      return '${seconds}s';
+    }
+    if (seconds <= 0) {
+      return '${minutes}m';
+    }
+    return '${minutes}m ${seconds}s';
   }
 }

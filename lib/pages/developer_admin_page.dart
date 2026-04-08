@@ -1,3 +1,4 @@
+import 'package:academic_async/controllers/attendance_controller.dart';
 import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/developer_admin_controller.dart';
 import 'package:academic_async/models/developer_admin_models.dart';
@@ -17,6 +18,8 @@ class DeveloperAdminPage extends StatelessWidget {
         ? Get.find<DeveloperAdminController>()
         : Get.put(DeveloperAdminController(), permanent: true);
     final AuthController authController = Get.find<AuthController>();
+    final AttendanceController attendanceController =
+        Get.find<AttendanceController>();
     final ColorScheme colors = Theme.of(context).colorScheme;
 
     return DefaultTabController(
@@ -27,7 +30,14 @@ class DeveloperAdminPage extends StatelessWidget {
           actions: [
             IconButton(
               tooltip: 'Logout',
-              onPressed: authController.signOut,
+              onPressed: () async {
+                if (!attendanceController.canPerformProtectedAction(
+                  actionLabel: 'logging out',
+                )) {
+                  return;
+                }
+                await authController.signOut();
+              },
               icon: const Icon(Icons.logout_rounded),
             ),
           ],
