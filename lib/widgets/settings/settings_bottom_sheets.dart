@@ -1,3 +1,4 @@
+import 'package:academic_async/controllers/attendance_controller.dart';
 import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/theme_controller.dart';
 import 'package:academic_async/controllers/get_user_data.dart';
@@ -131,6 +132,8 @@ class AccountSheet extends StatelessWidget {
     final String? email = authController.user.value?.email;
     final UserDataController userDataController =
         Get.find<UserDataController>();
+    final AttendanceController attendanceController =
+        Get.find<AttendanceController>();
 
     return SafeArea(
       child: Padding(
@@ -176,6 +179,11 @@ class AccountSheet extends StatelessWidget {
               onPressed: email == null
                   ? null
                   : () async {
+                      if (!attendanceController.canPerformProtectedAction(
+                        actionLabel: 'logging out',
+                      )) {
+                        return;
+                      }
                       await authController.signOut();
                       if (context.mounted) {
                         Navigator.of(context).maybePop();
