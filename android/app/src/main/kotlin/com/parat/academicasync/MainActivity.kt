@@ -14,6 +14,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     companion object {
         private const val UPDATE_CHANNEL = "academic_async/update_installer"
+        private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -35,6 +36,10 @@ class MainActivity : FlutterActivity() {
                 "openUnknownAppSourcesSettings" -> {
                     openUnknownAppSourcesSettings()
                     result.success(true)
+                }
+
+                "getUpdateStorageDir" -> {
+                    result.success(getUpdateStorageDir())
                 }
 
                 "installApk" -> {
@@ -70,6 +75,14 @@ class MainActivity : FlutterActivity() {
         startActivity(intent)
     }
 
+    private fun getUpdateStorageDir(): String {
+        val updatesDir = File(cacheDir, "updates")
+        if (!updatesDir.exists()) {
+            updatesDir.mkdirs()
+        }
+        return updatesDir.absolutePath
+    }
+
     private fun installApk(
         path: String,
         result: MethodChannel.Result,
@@ -89,20 +102,58 @@ class MainActivity : FlutterActivity() {
         }
 
         val authority = "$packageName.updateFileProvider"
-        val apkUri = FileProvider.getUriForFile(this, authority, apkFile)
+        val apkUri =
+            try {
+                FileProvider.getUriForFile(this, authority, apkFile)
+            } catch (error: IllegalArgumentException) {
+                result.error(
+                    "invalid_apk_uri",
+                    error.localizedMessage ?: "Unable to open the downloaded APK",
+                    null,
+                )
+                return
+            }
+
         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             data = apkUri
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, APK_MIME_TYPE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        val resolvedIntent =
+            when {
+                installIntent.resolveActivity(packageManager) != null -> installIntent
+                fallbackIntent.resolveActivity(packageManager) != null -> fallbackIntent
+                else -> null
+            }
+
+        if (resolvedIntent == null) {
+            result.error(
+                "installer_unavailable",
+                "Android installer app was not found",
+                null,
+            )
+            return
+        }
 
         try {
-            startActivity(installIntent)
+            startActivity(resolvedIntent)
             result.success(true)
         } catch (error: ActivityNotFoundException) {
             result.error(
                 "installer_unavailable",
                 error.localizedMessage ?: "Android installer app was not found",
+                null,
+            )
+        } catch (error: Exception) {
+            result.error(
+                "installer_failed",
+                error.localizedMessage ?: "Unable to open Android installer",
                 null,
             )
         }
