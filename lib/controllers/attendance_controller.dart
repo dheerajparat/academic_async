@@ -1323,6 +1323,9 @@ class AttendanceController extends GetxController {
     if (isExportingTeacherReport.value) {
       return;
     }
+    if (!canPerformProtectedAction(actionLabel: 'opening file picker')) {
+      return;
+    }
     if (teacherSessions.isEmpty) {
       Get.snackbar('Attendance', 'No report data available');
       return;

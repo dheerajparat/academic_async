@@ -1,11 +1,13 @@
+import 'package:academic_async/services/attendance_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-Future<void> launchCommunityUri(
-  Uri uri, {
-  required String label,
-}) async {
+Future<void> launchCommunityUri(Uri uri, {required String label}) async {
+  if (!AttendanceGuard.canProceed(actionLabel: 'opening external apps')) {
+    return;
+  }
+
   final List<LaunchMode> modes = switch (uri.scheme) {
     'http' || 'https' => const <LaunchMode>[
       LaunchMode.platformDefault,
@@ -59,11 +61,7 @@ class CommunityLinkText extends StatelessWidget {
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Text(
-          label,
-          textAlign: textAlign,
-          style: linkStyle,
-        ),
+        child: Text(label, textAlign: textAlign, style: linkStyle),
       ),
     );
   }

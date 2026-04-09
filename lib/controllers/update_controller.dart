@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:academic_async/config/app_update_config.dart';
+import 'package:academic_async/services/attendance_guard.dart';
 import 'package:academic_async/models/app_update_models.dart';
 import 'package:academic_async/services/app_update_service.dart';
 import 'package:academic_async/widgets/markdownview.dart';
@@ -212,12 +213,18 @@ class UpdateController extends GetxController with WidgetsBindingObserver {
   }
 
   Future<void> openReleasePage() async {
+    if (!AttendanceGuard.canProceed(actionLabel: 'opening external apps')) {
+      return;
+    }
     final String? htmlUrl = latestRelease.value?.htmlUrl;
     await AppUpdateService.openReleasePage(url: htmlUrl);
   }
 
   Future<void> _installDownloadedApk(String apkPath) async {
     if (_isOpeningInstaller) {
+      return;
+    }
+    if (!AttendanceGuard.canProceed(actionLabel: 'opening the installer app')) {
       return;
     }
 
@@ -351,6 +358,11 @@ class UpdateController extends GetxController with WidgetsBindingObserver {
           ),
           FilledButton(
             onPressed: () async {
+              if (!AttendanceGuard.canProceed(
+                actionLabel: 'opening phone settings',
+              )) {
+                return;
+              }
               Get.back<void>();
               await AppUpdateService.openUnknownAppSourcesSettings();
             },

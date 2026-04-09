@@ -1,3 +1,4 @@
+import 'package:academic_async/services/attendance_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:get/get.dart';
@@ -9,6 +10,9 @@ class MarkdownView extends StatelessWidget {
   final String data;
 
   Future<void> _openUrl(String text) async {
+    if (!AttendanceGuard.canProceed(actionLabel: 'opening external links')) {
+      return;
+    }
     final Uri? url = Uri.tryParse(text);
     if (url == null) {
       Get.snackbar('Link', 'Invalid link');
@@ -48,7 +52,8 @@ class MarkdownView extends StatelessWidget {
       },
       selectable: true,
       styleSheet: MarkdownStyleSheet(
-        p: theme.textTheme.bodyMedium?.copyWith(
+        p:
+            theme.textTheme.bodyMedium?.copyWith(
               fontSize: 14,
               height: 1.5,
               color: colors.onSurface,
