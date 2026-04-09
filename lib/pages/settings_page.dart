@@ -86,7 +86,11 @@ class SettingsPage extends GetView<SettingsController> {
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                   subtitle: const Text('App overview and usage'),
-                  onTap: () => _showAboutDialog(context),
+                  onTap: () => _showAboutDialog(
+                    context,
+                    appName: controller.appName.value,
+                    appVersion: controller.appVersion.value,
+                  ),
                 ),
               ],
             ),
@@ -107,15 +111,15 @@ class SettingsPage extends GetView<SettingsController> {
             ),
             SettingsGroup(
               children: [
-                const InfoTile(
+                InfoTile(
                   title: 'Application',
-                  value: SettingsController.appName,
+                  value: controller.appName.value,
                   icon: Icons.apps_rounded,
                 ),
                 const Divider(height: 1),
-                const InfoTile(
+                InfoTile(
                   title: 'Version',
-                  value: SettingsController.appVersion,
+                  value: controller.appVersion.value,
                   icon: Icons.verified_outlined,
                 ),
                 const Divider(height: 1),
@@ -139,11 +143,15 @@ class SettingsPage extends GetView<SettingsController> {
   }
 }
 
-void _showAboutDialog(BuildContext context) {
+void _showAboutDialog(
+  BuildContext context, {
+  required String appName,
+  required String appVersion,
+}) {
   showAboutDialog(
     context: context,
-    applicationName: SettingsController.appName,
-    applicationVersion: SettingsController.appVersion,
+    applicationName: appName,
+    applicationVersion: appVersion,
     applicationLegalese: 'Built for academic planning and reminders.',
     children: const [
       Text(

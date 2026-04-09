@@ -5,11 +5,13 @@ import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -29,9 +31,11 @@ class MainActivity : FlutterActivity() {
     private var attendanceLockRequested: Boolean = false
     private var hasRequestedStartupPermissions: Boolean = false
     private var lastAttendanceLockAttemptMillis: Long = 0
+    private var lastWindowModeWarningMillis: Long = 0
 
     override fun onPostResume() {
         super.onPostResume()
+        enforceSingleWindowModeIfNeeded()
         requestStartupPermissionsIfNeeded()
         ensureAttendanceLockIfRequested()
     }
@@ -39,8 +43,30 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
+            enforceSingleWindowModeIfNeeded()
             ensureAttendanceLockIfRequested()
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enforceSingleWindowModeIfNeeded()
+    }
+
+    override fun onMultiWindowModeChanged(
+        isInMultiWindowMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        enforceSingleWindowModeIfNeeded()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        enforceSingleWindowModeIfNeeded()
     }
 
     override fun onBackPressed() {
@@ -225,6 +251,32 @@ class MainActivity : FlutterActivity() {
             // Flutter side already shows a warning when strict lock cannot be enforced.
         } catch (_: Exception) {
             // Avoid crashing if screen pinning is unavailable on specific OEM builds.
+        }
+    }
+
+    private fun enforceSingleWindowModeIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return
+        }
+        if (!isInMultiWindowMode) {
+            return
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWindowModeWarningMillis > 1200) {
+            lastWindowModeWarningMillis = now
+            Toast
+                .makeText(
+                    this,
+                    "Split screen / mini window supported nahi hai. App full screen me kholein.",
+                    Toast.LENGTH_LONG,
+                ).show()
+        }
+
+        try {
+            finishAndRemoveTask()
+        } catch (_: Exception) {
+            finish()
         }
     }
 

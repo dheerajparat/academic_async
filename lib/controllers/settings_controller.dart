@@ -6,14 +6,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class SettingsController extends GetxController {
-  static const String appName = 'Academic Async';
-  static const String appVersion = '1.0.0+1';
-
   final RxList<DeveloperProfile> developers = <DeveloperProfile>[].obs;
   final RxBool isDevelopersLoading = true.obs;
   final RxnString developersError = RxnString();
+  final RxString appName = 'Academic Async'.obs;
+  final RxString appVersion = 'Unknown'.obs;
 
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _developersSubscription;
@@ -21,6 +21,7 @@ class SettingsController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    unawaited(_loadAppMetadata());
     unawaited(_loadCachedDevelopers());
     _listenDevelopers();
   }
@@ -68,6 +69,26 @@ class SettingsController extends GetxController {
         .collection('developers')
         .snapshots()
         .listen(_onDevelopersSnapshot, onError: _onDevelopersError);
+  }
+
+  Future<void> _loadAppMetadata() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      final String resolvedName = info.appName.trim();
+      final String resolvedVersion = info.version.trim();
+      final String resolvedBuild = info.buildNumber.trim();
+
+      if (resolvedName.isNotEmpty) {
+        appName.value = resolvedName;
+      }
+      if (resolvedVersion.isNotEmpty) {
+        appVersion.value = resolvedBuild.isEmpty
+            ? resolvedVersion
+            : '$resolvedVersion+$resolvedBuild';
+      }
+    } catch (_) {
+      // Keep fallback values when platform package metadata isn't available.
+    }
   }
 
   Future<void> _loadCachedDevelopers() async {

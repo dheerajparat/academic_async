@@ -2,6 +2,7 @@ import 'package:academic_async/controllers/attendance_controller.dart';
 import 'package:academic_async/controllers/auth_controller.dart';
 import 'package:academic_async/controllers/get_user_data.dart';
 import 'package:academic_async/controllers/home_controller.dart';
+import 'package:academic_async/controllers/settings_controller.dart';
 import 'package:academic_async/controllers/update_controller.dart';
 import 'package:academic_async/models/bottom_nav_item.dart';
 import 'package:academic_async/pages/developer_admin_page.dart';
@@ -25,6 +26,8 @@ class Homepage extends GetView<HomeController> {
     final Color accentColor = theme.colorScheme.primary;
     final UserDataController userDataController =
         Get.find<UserDataController>();
+    final SettingsController settingsController =
+        Get.find<SettingsController>();
     final Color scaffoldGradientEnd = isDarkMode ? Colors.black : Colors.white;
     final Color cardColor = isDarkMode ? Colors.grey.shade900 : Colors.white;
     final Color textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -70,6 +73,8 @@ class Homepage extends GetView<HomeController> {
             role: userDataController.role.value,
             currentIndex: selectedIndex,
             isDeveloper: isDeveloper,
+            appName: settingsController.appName.value,
+            appVersion: settingsController.appVersion.value,
           ),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
@@ -154,8 +159,8 @@ class Homepage extends GetView<HomeController> {
                         ),
                         child: Text(
                           lockSecondsLeft > 0
-                              ? 'Attendance live hai. $lockDurationLabel tak app exit/logout lock rahega.'
-                              : 'Attendance live hai. App exit/logout temporary lock hai.',
+                              ? 'Attendance live hai. $lockDurationLabel tak logout, app exit, aur app switching lock rahega.'
+                              : 'Attendance live hai. Logout, app exit, aur app switching temporary lock hai.',
                           style: TextStyle(
                             color: Theme.of(
                               context,
@@ -196,6 +201,8 @@ class _DrawerForAll extends StatelessWidget {
     required this.role,
     required this.currentIndex,
     required this.isDeveloper,
+    required this.appName,
+    required this.appVersion,
   });
 
   final Color cardColor;
@@ -210,6 +217,8 @@ class _DrawerForAll extends StatelessWidget {
   final String role;
   final int currentIndex;
   final bool isDeveloper;
+  final String appName;
+  final String appVersion;
 
   @override
   Widget build(BuildContext context) {
@@ -402,8 +411,8 @@ class _DrawerForAll extends StatelessWidget {
               Navigator.of(context).pop();
               showAboutDialog(
                 context: context,
-                applicationName: 'Academic Async',
-                applicationVersion: '1.0.0+1',
+                applicationName: appName,
+                applicationVersion: appVersion,
                 applicationLegalese:
                     'Built to simplify routine, syllabus, attendance, and academic planning.',
               );

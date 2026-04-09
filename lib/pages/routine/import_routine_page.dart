@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:academic_async/controllers/routine_controller.dart';
+import 'package:academic_async/services/attendance_guard.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,6 +47,9 @@ class _ImportRoutinePageState extends State<ImportRoutinePage> {
 
   Future<void> _importFromFile() async {
     await _setLoadingWhile(() async {
+      if (!AttendanceGuard.canProceed(actionLabel: 'opening file picker')) {
+        return;
+      }
       final FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: const <String>['json'],
