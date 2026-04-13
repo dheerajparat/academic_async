@@ -7,10 +7,16 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.pm.PackageManager
+import android.os.Bundle
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
+import android.os.UserManager
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -26,16 +32,55 @@ class MainActivity : FlutterActivity() {
         private const val ATTENDANCE_LOCK_CHANNEL = "academic_async/attendance_lock"
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val STARTUP_PERMISSION_REQUEST_CODE = 4107
+        private const val ANDROID_USER_ID_OFFSET = 100000
     }
 
     private var attendanceLockRequested: Boolean = false
     private var hasRequestedStartupPermissions: Boolean = false
     private var lastAttendanceLockAttemptMillis: Long = 0
     private var lastWindowModeWarningMillis: Long = 0
+    private var lastCloneWarningMillis: Long = 0
+    private val environmentGuardHandler = Handler(Looper.getMainLooper())
+    private val environmentGuardRunnable =
+        object : Runnable {
+            override fun run() {
+                enforceEnvironmentRestrictionsIfNeeded()
+                if (!isFinishing && !isDestroyed) {
+                    environmentGuardHandler.postDelayed(this, 400)
+                }
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enforceEnvironmentRestrictionsIfNeeded()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        startEnvironmentGuard()
+    }
+
+    override fun onStop() {
+        stopEnvironmentGuard()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        stopEnvironmentGuard()
+        super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        enforceEnvironmentRestrictionsIfNeeded()
+    }
 
     override fun onPostResume() {
         super.onPostResume()
-        enforceSingleWindowModeIfNeeded()
+        if (enforceEnvironmentRestrictionsIfNeeded()) {
+            return
+        }
         requestStartupPermissionsIfNeeded()
         ensureAttendanceLockIfRequested()
     }
@@ -43,14 +88,22 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            enforceSingleWindowModeIfNeeded()
+            if (enforceEnvironmentRestrictionsIfNeeded()) {
+                return
+            }
             ensureAttendanceLockIfRequested()
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        enforceSingleWindowModeIfNeeded()
+        enforceEnvironmentRestrictionsIfNeeded()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode)
+        enforceEnvironmentRestrictionsIfNeeded()
     }
 
     override fun onMultiWindowModeChanged(
@@ -58,7 +111,7 @@ class MainActivity : FlutterActivity() {
         newConfig: Configuration,
     ) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
-        enforceSingleWindowModeIfNeeded()
+        enforceEnvironmentRestrictionsIfNeeded()
     }
 
     override fun onPictureInPictureModeChanged(
@@ -66,7 +119,7 @@ class MainActivity : FlutterActivity() {
         newConfig: Configuration,
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        enforceSingleWindowModeIfNeeded()
+        enforceEnvironmentRestrictionsIfNeeded()
     }
 
     override fun onBackPressed() {
@@ -254,14 +307,97 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun enforceSingleWindowModeIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            return
+    private fun enforceEnvironmentRestrictionsIfNeeded(): Boolean {
+        if (isLikelyClonedProfile()) {
+            closeClonedInstance()
+            return true
         }
-        if (!isInMultiWindowMode) {
-            return
+        if (isLikelySplitOrMiniWindow()) {
+            closeSplitInstance()
+            return true
+        }
+        return isFinishing
+    }
+
+    private fun isLikelyClonedProfile(): Boolean {
+        val runtimeUserId = Process.myUid() / ANDROID_USER_ID_OFFSET
+        if (runtimeUserId != 0) {
+            return true
         }
 
+        val dataDirUserId = extractUserIdFromDataPath(filesDir.absolutePath)
+        if (dataDirUserId != null && dataDirUserId != 0) {
+            return true
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val userManager = getSystemService(Context.USER_SERVICE) as? UserManager
+            if (userManager?.isManagedProfile == true) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun extractUserIdFromDataPath(path: String): Int? {
+        val marker = "/data/user/"
+        val markerIndex = path.indexOf(marker)
+        if (markerIndex < 0) {
+            return null
+        }
+
+        val userIdStart = markerIndex + marker.length
+        if (userIdStart >= path.length) {
+            return null
+        }
+
+        val userIdEnd = path.indexOf('/', userIdStart).let { index ->
+            if (index == -1) path.length else index
+        }
+        if (userIdEnd <= userIdStart) {
+            return null
+        }
+
+        return path.substring(userIdStart, userIdEnd).toIntOrNull()
+    }
+
+    private fun closeClonedInstance() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastCloneWarningMillis > 1200) {
+            lastCloneWarningMillis = now
+            Toast
+                .makeText(
+                    this,
+                    "Cloned / Dual app instance allowed nahi hai. Official app hi use karein.",
+                    Toast.LENGTH_LONG,
+                ).show()
+        }
+
+        closeRestrictedInstanceHard()
+    }
+
+    private fun isLikelySplitOrMiniWindow(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false
+        }
+
+        if (isInMultiWindowMode) {
+            return true
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode) {
+            return true
+        }
+
+        if (isLikelyFloatingWindow()) {
+            return true
+        }
+
+        return isWindowBoundsReducedSignificantly()
+    }
+
+    private fun closeSplitInstance() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastWindowModeWarningMillis > 1200) {
             lastWindowModeWarningMillis = now
@@ -273,11 +409,92 @@ class MainActivity : FlutterActivity() {
                 ).show()
         }
 
+        closeRestrictedInstanceHard()
+    }
+
+    private fun closeRestrictedInstanceHard() {
+        try {
+            moveTaskToBack(true)
+        } catch (_: Exception) {
+            // no-op
+        }
+        try {
+            finishAffinity()
+        } catch (_: Exception) {
+            // no-op
+        }
         try {
             finishAndRemoveTask()
         } catch (_: Exception) {
             finish()
         }
+
+        // OEM overlays may keep task alive; kill process to block split/clone bypass reliably.
+        environmentGuardHandler.postDelayed(
+            {
+                try {
+                    Process.killProcess(Process.myPid())
+                } catch (_: Exception) {
+                    // no-op
+                }
+            },
+            120,
+        )
+    }
+
+    private fun startEnvironmentGuard() {
+        environmentGuardHandler.removeCallbacks(environmentGuardRunnable)
+        environmentGuardHandler.post(environmentGuardRunnable)
+    }
+
+    private fun stopEnvironmentGuard() {
+        environmentGuardHandler.removeCallbacks(environmentGuardRunnable)
+    }
+
+    private fun isWindowBoundsReducedSignificantly(): Boolean {
+        val rootView = window?.decorView ?: return false
+        val viewWidth = rootView.width
+        val viewHeight = rootView.height
+        if (viewWidth <= 0 || viewHeight <= 0) {
+            return false
+        }
+
+        val minLossPx = (resources.displayMetrics.density * 140).toInt()
+        val fullWidth: Int
+        val fullHeight: Int
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowManager =
+                getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return false
+            val maxBounds = windowManager.maximumWindowMetrics.bounds
+            fullWidth = maxBounds.width()
+            fullHeight = maxBounds.height()
+        } else {
+            val displayMetrics = resources.displayMetrics
+            fullWidth = displayMetrics.widthPixels
+            fullHeight = displayMetrics.heightPixels
+        }
+
+        if (fullWidth <= 0 || fullHeight <= 0) {
+            return false
+        }
+
+        val widthLoss = fullWidth - viewWidth
+        val heightLoss = fullHeight - viewHeight
+        return widthLoss > minLossPx || heightLoss > minLossPx
+    }
+
+    private fun isLikelyFloatingWindow(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return false
+        }
+        val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return false
+        val currentBounds = windowManager.currentWindowMetrics.bounds
+        val maxBounds = windowManager.maximumWindowMetrics.bounds
+        val minLossPx = (resources.displayMetrics.density * 120).toInt()
+        val widthLoss = maxBounds.width() - currentBounds.width()
+        val heightLoss = maxBounds.height() - currentBounds.height()
+        return widthLoss > minLossPx || heightLoss > minLossPx
     }
 
     private fun openUnknownAppSourcesSettings() {
